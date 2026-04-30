@@ -922,25 +922,36 @@ def db_create_identityaccessrequest_notifications(session, itip, rtip, iar):
     :param rtip: A rtip ID of the rtip involved in the request
     :param iar: A identity access request model
     """
+    context = session.query(models.Context).filter(models.Context.id == itip.context_id).one()
+    iar_data = serializers.serialize_identityaccessrequest(session, iar)
+
+    lang_data = {}
+
     for user in session.query(models.User).filter(models.User.role == 'custodian',
                                                   models.User.tid == itip.tid,
                                                   models.User.notification.is_(True)):
-        context = session.query(models.Context).filter(models.Context.id == itip.context_id).one()
+
+        if user.language not in lang_data:
+            lang_data[user.language] = {
+                'tip': serializers.serialize_rtip(session, itip, rtip, user.language),
+                'context': admin_serialize_context(session, context, user.language),
+                'node': db_admin_serialize_node(session, itip.tid, user.language),
+            }
+
+            if lang_data[user.language]['node']['mode'] == 'default':
+                lang_data[user.language]['notification'] = db_get_notification(session, itip.tid, user.language)
+            else:
+                lang_data[user.language]['notification'] = db_get_notification(session, 1, user.language)
 
         data = {
-            'type': 'identity_access_request'
+            'type': 'identity_access_request',
+            'user': user_serialize_user(session, user, user.language),
+            'tip': lang_data[user.language]['tip'],
+            'context': lang_data[user.language]['context'],
+            'iar': iar_data,
+            'node': lang_data[user.language]['node'],
+            'notification': lang_data[user.language]['notification']
         }
-
-        data['user'] = user_serialize_user(session, user, user.language)
-        data['tip'] = serializers.serialize_rtip(session, itip, rtip, user.language)
-        data['context'] = admin_serialize_context(session, context, user.language)
-        data['iar'] = serializers.serialize_identityaccessrequest(session, iar)
-        data['node'] = db_admin_serialize_node(session, itip.tid, user.language)
-
-        if data['node']['mode'] == 'default':
-            data['notification'] = db_get_notification(session, itip.tid, user.language)
-        else:
-            data['notification'] = db_get_notification(session, 1, user.language)
 
         subject, body = Templating().get_mail_subject_and_body(data)
 
